@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MPD Controller</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="jquery.mobile-1.4.5.css"/>
+    <link rel="stylesheet" href="styles.css"/>
+    <script src="jquery-2.2.3.js"></script>
+    <script src="jquery.mobile-1.4.5.js"></script>
+    <script src="dropzone.js"></script>
+    <style type="text/css" id="animations"></style>
+</head>
+<body>
+<div data-role="page" data-title="MPD Controller">
+
+    <div data-role="panel" data-display="overlay" data-position="right" id="options-panel">
+        <a href="#" class="playback ui-btn ui-corner-all" id="btn-play">Play</a>
+        <a href="#" class="playback ui-btn ui-corner-all" id="btn-pause">Pause</a>
+        <a href="#" class="playback ui-btn ui-corner-all" id="btn-stop">Stop</a>
+        <hr/>
+        <form class="full-width-slider">
+            <input id="volume" type="range" min="0" max="100" value="50" data-highlight="true">
+        </form>
+    </div>
+
+    <div data-role="header" data-theme="c" data-position="fixed">
+        <a class="ui-btn-left ui-btn ui-btn-inline ui-corner-all" id="state" href="#">unknown</a>
+        <h1>MPD Controller</h1>
+        <a class="ui-btn-right ui-btn ui-btn-inline ui-corner-all ui-btn-icon-notext ui-icon-gear" href="#options-panel"></a>
+    </div>
+    <!-- /header -->
+
+    <div data-role="content" id="song-area">
+        <ul data-role="listview" data-theme="c" data-inset="true" id="playlist">
+        </ul>
+    </div>
+    <!-- /content -->
+
+    <div data-role="footer" class="ui-bar" data-position="fixed" data-theme="c">
+        <h1>play your party music - jointly!</h1>
+    </div>
+    <!-- /footer -->
+
+</div>
+<!-- /page -->
+</body>
+<script>
+    ;
+    (function () {
+
+        $(document).bind('mobileinit', function () {
+            $.mobile.loader.prototype.options.text = "loading";
+            $.mobile.loader.prototype.options.textVisible = true;
+            $.mobile.loader.prototype.options.theme = "c";
+            $.mobile.loader.prototype.options.html = "";
+        });
+
+        $(function () {
+
+            String.prototype.format = function () {
+                var args = arguments;
+                return this.replace(/{(\d+)}/g, function (match, number) {
+                    return typeof args[number] != 'undefined'
+                            ? args[number]
+                            : match
+                            ;
+                });
+            };
+
+            $.ajaxSetup({ cache: false });
+
+            function pad(n) {
+                return (n < 10) ? ("0" + n) : n;
+            };
+
+            var App = {
+
+                listURL: '/list',
+                playURL: '/play',
+                pauseURL: '/pause',
+                stopURL: '/stop',
+                statusURL: '/status',
+                volumeURL: '/volume/',
+                queueURL: '/queue',
+
+                init: function () {
+                    $.mobile.loading('show');
+
+                    App.getStatus();
+
+                    $('#btn-stop').tap(App.stop);
+                    $('#btn-play').tap(App.play);
+                    $('#btn-pause').tap(App.pause);
+
+                    $('#playlist').on('tap', 'li a', function () {
+                        //App.jump($(this).attr('song-id'));
+                    });
+
+                    $('#volume').on('slidestop', function (event) {
+                        App.setVolume($('#volume').val());
+                    });
+
+                    $('#song-area').dropzone({
+                        url: App.queueURL,
+                        paramName: 'song',
+                        addedfile: function(file) { },
+                        success: function(file, response) {
+                            $.get(App.listURL, App.renderPlaylist);
+                        }
+                    });
+
+                    $.get(App.listURL, function(data) {
+                        App.renderPlaylist(data);
+                        App.getStatus();
+                    });
+
+                    (function poll() {
+                        setTimeout(function() {
+                            $.ajax({
+                                url: App.listURL + "?" + Date.now(),
+                                success: App.renderPlaylist,
+                                dataType: "json",
+                                complete: poll
+                            });
+                        }, 5000);
+                    })();
+
+                    $('#playlist').sortable();
+                    //$('#playlist').disableSelection();
+                    <!-- Refresh list to the end of sort to have a correct display -->
+                    $('#playlist').bind('sortstop', function(event, ui) {
+                        $('#playlist').listview('refresh');
+                    });
+
+                    $.mobile.loading('hide');
+                },
+
+                setVolume: function (i) {
+                    $.get(App.volumeURL + i  + "?" + Date.now())
+                },
+
+                stop: function () {
+                    $.get(App.stopURL  + "?" + Date.now(), function (data) {
+                        App.getStatus();
+                    });
+                },
+
+                play: function () {
+                    $.get(App.playURL + "?" + Date.now(), function (data) {
+                        App.getStatus();
+                    });
+                },
+
+                pause: function () {
+                    $.get(App.pauseURL + "?" + Date.now(), function (data) {
+                        App.getStatus();
+                    });
+                },
+
+                getStatus: function () {
+                    $.get(App.statusURL, App.renderStatus);
+                },
+
+                renderPlaylist: function (data) {
+                    var playlist = data.list;
+                    var _list = "",
+                        _template = '<li id="song-{0}">{1} - {2} [{3}:{4}]</li>';
+
+                    _list = _list + '<li data-role="list-divider">List</li>';
+
+                    for (var i=0; i<playlist.length;++i) {
+                        var song = playlist[i];
+                        //console.log(song);
+                        var duration = song['time'];
+                        var mins = (duration / 60)|0, secs = pad((duration % 60)|0);
+                        _list = _list + _template.format(song['id'], song['artist'], song['title'], mins, secs);
+                    }
+
+                    $('#playlist').html(_list).listview("refresh");
+                },
+
+                renderStatus: function (data) {
+                    var state = data.state;
+                    $('.playback').removeClass('ui-state-disabled');
+                    $('#btn-' + state).addClass('ui-state-disabled');
+                    if (state == 'stop')
+                        $('#btn-pause').addClass('ui-state-disabled');
+
+                    $('#state').text(state);
+
+                    $('#volume').val(data.volume).slider('refresh');
+
+                    var song = data.song;
+                    if (song) {
+                        App.animatePlayback(song.id, data.elapsed, song.time, function() {
+                            $.get(App.listURL, function(data) {
+                                App.renderPlaylist(data);
+                                App.getStatus();
+                            });
+                        });
+                    }
+                },
+
+                animatePlayback: function(id, elapsed, total, cb) {
+                    var begin = Date.now();
+                    var sheet = document.styleSheets[2];
+                    sheet.insertRule('#playlist #song-'+id+' { }', 0);
+                    var rule = sheet.cssRules[0];
+                    while (sheet.cssRules.length > 1)
+                        sheet.deleteRule(1);
+                    (function anim() {
+                        //var elem = $('#playlist #song-' + id);
+                        if ($('#state').text() != 'play')
+                            return;
+                        //console.log(begin); console.log(elapsed); console.log(total);
+                        var t = (Date.now() - begin) / 1000 + elapsed;
+                        var val = 100 * t / total;
+                        //console.log('t:' + t + ', val:' + val);
+                        rule.style.backgroundImage = "linear-gradient(90deg, cornflowerblue " + val + "%, wheat 0%)";
+                        if (val < 100) {
+                            setTimeout(anim, 1000);
+                        } else {
+                            if (cb) cb();
+                        }
+                    })();
+                }
+
+            };
+
+            App.init();
+
+        });
+    }());
+</script>
+</html>
+
